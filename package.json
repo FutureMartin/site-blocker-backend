@@ -12,7 +12,7 @@
   "dependencies": {
     "alipay-sdk": "^4.14.0",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^4.19.2"
   },
   "engines": {
     "node": "20.x"
