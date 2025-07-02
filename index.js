@@ -49,9 +49,10 @@ try {
     appId: APP_ID,
     privateKey: APP_PRIVATE_KEY,
     alipayPublicKey: ALIPAY_PUBLIC_KEY,
-    gateway: 'https://openapi.alipay.com/gateway.do',
+    // 将网关切换到沙箱环境进行测试
+    gateway: 'https://openapi-sandbox.alipay.com/gateway.do',
   });
-  console.log('支付宝 SDK 初始化成功。');
+  console.log('支付宝 SDK 初始化成功 (沙箱模式)。');
 } catch (error) {
   console.error('[启动失败] 支付宝 SDK 初始化时发生错误:', error.message);
   throw new Error(`支付宝 SDK 初始化失败: ${error.message}`);
@@ -63,7 +64,7 @@ app.get('/api/pay', async (req, res) => {
   try {
     const orderId = `order_${Date.now()}`;
     const amount = '0.01';
-    const subject = '网站访问权限购买';
+    const subject = '网站访问权限购买 (测试)';
 
     const formData = new AlipayFormData();
     formData.setMethod('get');
