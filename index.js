@@ -1,31 +1,7 @@
 // 导入必要的库
 const express = require('express');
 const cors = require('cors');
-
-// --- START: 重要代码更新 ---
-// 使用标准的 CommonJS 方式导入 alipay-sdk
-// 这是导致之前崩溃的根本原因
-const AlipaySDK = require('alipay-sdk');
-
-// **增加防御性检查**：验证 AlipaySDK 是否被正确导入为一个可用的类(构造函数)
-if (typeof AlipaySDK !== 'function') {
-  const errorMsg = '[启动失败] 无法从 "alipay-sdk" 中正确导入 AlipaySDK。请检查依赖版本或模块导出方式。';
-  console.error(errorMsg);
-  // 在生产环境中，如果核心依赖加载失败，则直接退出进程
-  process.exit(1);
-}
-
-// AlipayFormData 通常是主类的一个静态属性
-const AlipayFormData = AlipaySDK.AlipayFormData;
-
-// **增加防御性检查**：验证 AlipayFormData 是否也被正确获取
-if (typeof AlipayFormData !== 'function') {
-  const errorMsg = '[启动失败] 无法从 AlipaySDK 中正确导入 AlipayFormData。';
-  console.error(errorMsg);
-  // 在生产环境中，如果核心依赖加载失败，则直接退出进程
-  process.exit(1);
-}
-// --- END: 重要代码更新 ---
+const crypto = require('crypto'); // 导入 Node.js 内置的加密库
 
 // 从配置文件导入密钥和ID
 const { APP_ID, APP_PRIVATE_KEY, ALIPAY_PUBLIC_KEY, YOUR_EXTENSION_ID } = require('./config');
@@ -43,8 +19,7 @@ for (const [key, value] of Object.entries(requiredEnvVars)) {
   if (!value) {
     const errorMessage = `[启动失败] 致命错误: 缺少环境变量 ${key}。请在 Vercel 项目设置中正确配置该变量。`;
     console.error(errorMessage);
-    // 在生产环境中，如果环境变量缺失，则直接退出进程
-    process.exit(1);
+    throw new Error(errorMessage);
   }
 }
 console.log('[启动成功] 所有必需的环境变量均已成功加载。');
@@ -60,62 +35,66 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// 初始化支付宝 SDK
-let alipaySdk;
-try {
-  alipaySdk = new AlipaySDK({
-    appId: APP_ID,
-    privateKey: APP_PRIVATE_KEY,
-    alipayPublicKey: ALIPAY_PUBLIC_KEY,
-    gateway: 'https://openapi.alipay.com/gateway.do',
-  });
-  console.log('支付宝 SDK 初始化成功 (生产模式)。');
-} catch (error) {
-  console.error('[启动失败] 支付宝 SDK 初始化时发生错误:', error.message);
-  // 在生产环境中，如果 SDK 初始化失败，则直接退出进程
-  process.exit(1);
-}
 
-
+// --- START: 手动实现支付宝支付逻辑 (不再使用 alipay-sdk) ---
 // 创建一个 API 路由来生成支付订单
-app.get('/api/pay', async (req, res) => {
+app.get('/api/pay', (req, res) => {
   try {
-    const orderId = `order_${Date.now()}`;
-    const amount = '0.01';
-    const subject = '网站访问权限购买';
+    console.log('开始手动生成支付宝支付链接...');
 
-    const formData = new AlipayFormData();
-    formData.setMethod('get');
+    // 1. 公共请求参数
+    const params = {
+      app_id: APP_ID,
+      method: 'alipay.trade.page.pay',
+      format: 'JSON',
+      charset: 'utf-8',
+      sign_type: 'RSA2',
+      timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      version: '1.0',
+      return_url: 'https://www.google.com', // 支付成功后的回跳地址
+    };
+
+    // 2. 业务请求参数
+    const bizContent = {
+      out_trade_no: `order_${Date.now()}`,
+      product_code: 'FAST_INSTANT_TRADE_PAY',
+      total_amount: '0.01',
+      subject: '网站访问权限购买',
+    };
+    params.biz_content = JSON.stringify(bizContent);
+
+    // 3. 对所有参数按 key 进行字典序排序，并拼接成待签名字符串
+    const sortedKeys = Object.keys(params).sort();
+    const preSignStr = sortedKeys.map(key => `${key}=${params[key]}`).join('&');
+    console.log('待签名字符串 (preSignStr):', preSignStr);
+
+    // 4. 使用应用私钥进行签名
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(preSignStr, 'utf8');
+    const sign = signer.sign(APP_PRIVATE_KEY, 'base64');
+    console.log('生成的签名 (sign):', sign);
+
+    // 5. 构造最终的请求 URL (所有参数值都需要进行 URL 编码)
+    const alipayGateway = 'https://openapi.alipay.com/gateway.do';
+    const encodedParams = sortedKeys.map(key => `${key}=${encodeURIComponent(params[key])}`).join('&');
+    const finalUrl = `${alipayGateway}?${encodedParams}&sign=${encodeURIComponent(sign)}`;
     
-    // 设置同步回调地址
-    formData.addField('returnUrl', 'https://www.google.com'); // 用户支付成功后跳转的页面
+    console.log('最终生成的支付 URL:', finalUrl);
 
-    // 设置业务参数
-    formData.addField('bizContent', {
-      outTradeNo: orderId,
-      productCode: 'FAST_INSTANT_TRADE_PAY',
-      totalAmount: amount,
-      subject: subject,
-    });
-    
-    // 调用 SDK 生成支付链接
-    const result = await alipaySdk.exec('alipay.trade.page.pay', {}, {
-      formData: formData,
-    });
+    // 6. 重定向到支付宝支付页面
+    res.redirect(finalUrl);
 
-    console.log('支付链接生成成功:', result);
-    // 将用户重定向到支付宝收银台
-    res.redirect(result);
   } catch (error) {
-    console.error('生成支付链接时出错:', error);
-    // 在向客户端发送响应之前记录服务器错误
-    res.status(500).send('生成支付链接失败');
+    console.error('生成支付链接时出错:', error.stack); // 使用 error.stack 获取更详细的错误信息
+    res.status(500).send(`生成支付链接失败: ${error.message}`);
   }
 });
+// --- END: 手动实现支付宝支付逻辑 ---
+
 
 // 根路由，用于测试服务是否正常运行
 app.get('/', (req, res) => {
-  res.send('支付宝支付后端服务运行中...');
+  res.send('支付宝支付后端服务运行中 (手动签名模式)...');
 });
 
 // 导出 app 实例，以便 Vercel 可以使用
