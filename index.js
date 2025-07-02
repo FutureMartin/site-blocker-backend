@@ -1,112 +1,65 @@
-// 文件: index.js
+// 导入必要的库
 const express = require('express');
 const cors = require('cors');
-const AlipaySdk = require('alipay-sdk').default;
-const { appId, appPrivateKey, alipayPublicKey } = require('./config');
+const AlipaySDK = require('alipay-sdk').default;
+const AlipayFormData = require('alipay-sdk/lib/form').default;
 
+// 从配置文件导入密钥和ID
+const { APP_ID, APP_PRIVATE_KEY, ALIPAY_PUBLIC_KEY, YOUR_EXTENSION_ID } = require('./config');
+
+// 初始化 Express 应用
 const app = express();
-const port = process.env.PORT || 3001;
 
-// 初始化支付宝 SDK
-const alipaySdk = new AlipaySdk({
-  appId: appId,
-  privateKey: appPrivateKey.replace(/\\n/g, '\n'), // 处理环境变量中的换行符
-  alipayPublicKey: alipayPublicKey.replace(/\\n/g, '\n'),
-  gateway: 'https://openapi.alipay.com/gateway.do', // 使用正式网关
-});
-
-// 存储订单状态 (在真实应用中，你应该使用数据库)
-const orders = new Map();
-
-// 配置 CORS
-const extensionId = process.env.YOUR_EXTENSION_ID;
-if (!extensionId) {
-    console.error("错误：环境变量 YOUR_EXTENSION_ID 未设置！");
-}
+// 配置 CORS 中间件，允许特定来源的请求
 const corsOptions = {
-  origin: `chrome-extension://${extensionId}`,
-  optionsSuccessStatus: 200
+  origin: `chrome-extension://${YOUR_EXTENSION_ID}`,
+  optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 app.use(cors(corsOptions));
-app.use(express.json());
 
+// 初始化支付宝 SDK
+const alipaySdk = new AlipaySDK({
+  appId: APP_ID,
+  privateKey: APP_PRIVATE_KEY,
+  alipayPublicKey: ALIPAY_PUBLIC_KEY,
+  gateway: 'https://openapi.alipay.com/gateway.do', // 支付宝网关地址
+});
 
-// API 路由
-
-// 1. 创建支付订单
-app.post('/api/create-order', async (req, res) => {
-  const orderId = `SITE_BLOCKER_${Date.now()}`;
-  const subject = '网站拦截器 - 终身专业版';
-  const totalAmount = '1.00'; // 支付金额
-
+// 创建一个 API 路由来生成支付订单
+app.get('/api/pay', async (req, res) => {
   try {
-    const result = await alipaySdk.exec('alipay.trade.precreate', {
+    // 从查询参数中获取订单信息，这里我们使用固定的测试值
+    const orderId = `order_${Date.now()}`; // 生成一个唯一的订单号
+    const amount = '0.01'; // 支付金额，单位为元
+    const subject = '网站访问权限购买'; // 订单标题
+
+    // 创建一个 FormData 实例用于生成支付表单
+    const formData = new AlipayFormData();
+    formData.setMethod('get'); // 设置请求方法
+    formData.add({
       bizContent: {
-        out_trade_no: orderId,
-        total_amount: totalAmount,
-        subject: subject,
+        outTradeNo: orderId, // 商户订单号
+        productCode: 'FAST_INSTANT_TRADE_PAY', // 销售产品码，固定值
+        totalAmount: amount, // 订单总金额
+        subject: subject, // 订单标题
       },
     });
-
-    // 保存订单初始状态
-    orders.set(orderId, { status: 'PENDING' });
-
-    console.log('创建订单成功:', result);
-    res.json({
-      success: true,
-      orderId: orderId,
-      qrCodeUrl: result.qrCode, // 支付宝返回的二维码链接
+    
+    // 调用支付宝 SDK 的 pageExecute 方法生成支付链接
+    const result = await alipaySdk.exec('alipay.trade.page.pay', {}, {
+      formData: formData,
     });
+
+    // 成功后，将支付宝返回的支付链接发送给前端
+    console.log('支付链接生成成功:', result);
+    res.json({ success: true, paymentUrl: result });
+
   } catch (error) {
-    console.error('创建订单失败:', error);
-    res.status(500).json({ success: false, message: '与支付宝通信失败' });
+    // 如果发生错误，记录错误日志并返回错误信息
+    console.error('生成支付链接失败:', error);
+    res.status(500).json({ success: false, message: '生成支付链接失败' });
   }
 });
 
-// 2. 客户端轮询检查订单状态
-app.get('/api/check-status', (req, res) => {
-  const { orderId } = req.query;
-  if (!orderId || !orders.has(orderId)) {
-    return res.status(404).json({ success: false, message: '订单不存在' });
-  }
-
-  const orderInfo = orders.get(orderId);
-  res.json({ success: true, status: orderInfo.status, licenseKey: orderInfo.licenseKey });
-});
-
-// 3. 接收支付宝的异步回调通知
-app.post('/api/alipay-notify', async (req, res) => {
-  console.log('接收到支付宝异步通知:', req.body);
-  try {
-    // 验证签名
-    const isSignVerified = alipaySdk.checkNotifySign(req.body);
-    if (!isSignVerified) {
-      console.error('异步通知验签失败');
-      return res.status(400).send('fail');
-    }
-
-    // 验签成功，处理业务逻辑
-    const { out_trade_no, trade_status } = req.body;
-
-    if (trade_status === 'TRADE_SUCCESS' || trade_status === 'TRADE_FINISHED') {
-      const orderInfo = orders.get(out_trade_no);
-      if (orderInfo && orderInfo.status !== 'PAID') {
-        // 生成许可证密钥
-        const licenseKey = `PRO-ALIPAY-${out_trade_no.slice(-8)}`;
-        // 更新订单状态
-        orders.set(out_trade_no, { status: 'PAID', licenseKey: licenseKey });
-        console.log(`订单 ${out_trade_no} 支付成功，许可证已生成。`);
-      }
-    }
-    // 必须返回 'success' 给支付宝，否则它会持续发送通知
-    res.send('success');
-  } catch (error) {
-    console.error('处理异步通知失败:', error);
-    res.status(500).send('fail');
-  }
-});
-
-
-app.listen(port, () => {
-  console.log(`服务器正在运行于 http://localhost:${port}`);
-});
+// 导出 Express 应用实例，供 Vercel 调用
+module.exports = app;
