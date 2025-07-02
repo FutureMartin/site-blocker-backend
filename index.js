@@ -1,13 +1,18 @@
 // 导入必要的库
 const express = require('express');
 const cors = require('cors');
-const AlipaySDK = require('alipay-sdk').default;
-const AlipayFormData = require('alipay-sdk/lib/form').default;
+
+// --- START: 重要代码更新 ---
+// 修正 alipay-sdk 的导入方式
+// 旧的 'alipay-sdk/lib/form' 导入路径在新版本中已失效，会导致 ERR_PACKAGE_PATH_NOT_EXPORTED 错误
+// 正确的方式是从主模块中解构出 AlipaySDK 和 AlipayFormData
+const { default: AlipaySDK, AlipayFormData } = require('alipay-sdk');
+// --- END: 重要代码更新 ---
 
 // 从配置文件导入密钥和ID
 const { APP_ID, APP_PRIVATE_KEY, ALIPAY_PUBLIC_KEY, YOUR_EXTENSION_ID } = require('./config');
 
-// --- START: 增加环境变量健壮性检查 ---
+// --- START: 环境变量健壮性检查 ---
 // 在应用启动时，检查所有必需的环境变量是否都已设置。
 console.log('开始检查环境变量...');
 const requiredEnvVars = {
@@ -20,7 +25,6 @@ const requiredEnvVars = {
 for (const [key, value] of Object.entries(requiredEnvVars)) {
   if (!value) {
     // 如果在 Vercel 环境中，直接抛出错误会导致函数崩溃并在日志中记录明确的原因。
-    // 这比程序静默失败要容易调试得多。
     const errorMessage = `[启动失败] 致命错误: 缺少环境变量 ${key}。请在 Vercel 项目设置中正确配置该变量。`;
     console.error(errorMessage);
     // 抛出错误以停止执行，Vercel会捕获这个错误并显示在日志中。
@@ -28,23 +32,21 @@ for (const [key, value] of Object.entries(requiredEnvVars)) {
   }
 }
 console.log('[启动成功] 所有必需的环境变量均已成功加载。');
-// --- END: 增加环境变量健壮性检查 ---
-
+// --- END: 环境变量健壮性检查 ---
 
 // 初始化 Express 应用
 const app = express();
 
-// 配置 CORS 中间件，允许特定来源的请求
+// 配置 CORS，允许来自你的 Edge 扩展的请求
 const corsOptions = {
   origin: `chrome-extension://${YOUR_EXTENSION_ID}`,
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 
+// 初始化支付宝 SDK
 let alipaySdk;
 try {
-  // 初始化支付宝 SDK
-  // 确保传入的密钥是完整的 PEM 格式
   alipaySdk = new AlipaySDK({
     appId: APP_ID,
     privateKey: APP_PRIVATE_KEY,
@@ -87,20 +89,18 @@ app.get('/api/pay', async (req, res) => {
     });
 
     console.log('支付链接生成成功:', result);
-    res.json({ success: true, paymentUrl: result });
-
+    // 重定向到支付宝支付页面
+    res.redirect(result);
   } catch (error) {
-    // 优化错误日志，打印出支付宝返回的详细错误信息
-    console.error('生成支付链接失败，详细错误:', JSON.stringify(error, null, 2));
-    res.status(500).json({
-        success: false,
-        message: '生成支付链接失败',
-        // 将具体的错误码和信息也返回给前端，方便调试
-        errorCode: error.subCode || error.code,
-        errorMessage: error.subMsg || error.message,
-    });
+    console.error('生成支付链接时出错:', error);
+    res.status(500).send('生成支付链接失败');
   }
 });
 
-// 导出 Express 应用实例，供 Vercel 调用
+// 根路由，用于测试服务是否正常运行
+app.get('/', (req, res) => {
+  res.send('支付宝支付后端服务运行中...');
+});
+
+// 导出 app 实例，以便 Vercel 可以使用
 module.exports = app;
