@@ -68,6 +68,11 @@ app.get('/api/pay', async (req, res) => {
 
     const formData = new AlipayFormData();
     formData.setMethod('get');
+    
+    // **重要更新**: 显式设置支付成功后的回跳地址
+    // 这是一个临时的测试地址，请在正式上线时替换为你自己的“支付成功”页面地址。
+    formData.addField('returnUrl', 'https://www.google.com');
+
     formData.add({
       bizContent: {
         outTradeNo: orderId,
