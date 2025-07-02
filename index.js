@@ -4,9 +4,11 @@ const cors = require('cors');
 
 // --- START: 重要代码更新 ---
 // 修正 alipay-sdk 的导入方式
-// 旧的 'alipay-sdk/lib/form' 导入路径在新版本中已失效，会导致 ERR_PACKAGE_PATH_NOT_EXPORTED 错误
-// 正确的方式是从主模块中解构出 AlipaySDK 和 AlipayFormData
-const { default: AlipaySDK, AlipayFormData } = require('alipay-sdk');
+// 根据最新的错误日志 "AlipaySDK is not a constructor"，这表明之前的导入方式不正确。
+// CommonJS 模块的导入方式可能发生了变化。我们现在尝试一种更标准的导入方法。
+const AlipaySDK = require('alipay-sdk');
+// AlipayFormData 现在作为主导出对象的一个属性来提供
+const AlipayFormData = AlipaySDK.AlipayFormData;
 // --- END: 重要代码更新 ---
 
 // 从配置文件导入密钥和ID
