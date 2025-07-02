@@ -4,14 +4,31 @@ const cors = require('cors');
 
 // --- START: 重要代码更新 ---
 // 修正 alipay-sdk 的导入方式
-// 持续出现的 "AlipaySDK is not a constructor" 错误表明模块导入存在问题。
-// 这通常是 CommonJS (require) 和 ES Modules (import/export) 之间的兼容性问题。
-// 我们采用一种更健壮的方式来获取导出的类。
-const sdk = require('alipay-sdk');
-// 尝试获取 .default 导出（用于 ESM 模块），如果不存在，则回退到主导出（用于传统 CJS 模块）。
-const AlipaySDK = sdk.default || sdk;
-// 假设 AlipayFormData 现在是主 SDK 类的一个静态属性。
+// 经过多次尝试，"is not a constructor" 错误指向模块导入问题。
+// 我们将采用一种更明确的方式，并锁定到 alipay-sdk 的 default 导出，
+// 这是许多现代库在 CommonJS 环境下的标准做法。
+
+// 直接获取 default 导出作为主类
+const AlipaySDK = require('alipay-sdk').default;
+
+// **增加防御性检查**：验证 AlipaySDK 是否被正确导入为一个可用的类(构造函数)
+if (typeof AlipaySDK !== 'function') {
+  const errorMsg = '[启动失败] 无法从 "alipay-sdk" 中正确导入 AlipaySDK。请检查依赖版本或模块导出方式。';
+  console.error(errorMsg);
+  // 抛出明确的错误，终止应用启动
+  throw new Error(errorMsg);
+}
+
+// AlipayFormData 通常是主类的一个静态属性
 const AlipayFormData = AlipaySDK.AlipayFormData;
+
+// **增加防御性检查**：验证 AlipayFormData 是否也被正确获取
+if (typeof AlipayFormData !== 'function') {
+  const errorMsg = '[启动失败] 无法从 AlipaySDK 中正确导入 AlipayFormData。';
+  console.error(errorMsg);
+  // 抛出明确的错误，终止应用启动
+  throw new Error(errorMsg);
+}
 // --- END: 重要代码更新 ---
 
 // 从配置文件导入密钥和ID
@@ -29,10 +46,8 @@ const requiredEnvVars = {
 
 for (const [key, value] of Object.entries(requiredEnvVars)) {
   if (!value) {
-    // 如果在 Vercel 环境中，直接抛出错误会导致函数崩溃并在日志中记录明确的原因。
     const errorMessage = `[启动失败] 致命错误: 缺少环境变量 ${key}。请在 Vercel 项目设置中正确配置该变量。`;
     console.error(errorMessage);
-    // 抛出错误以停止执行，Vercel会捕获这个错误并显示在日志中。
     throw new Error(errorMessage);
   }
 }
@@ -76,7 +91,7 @@ app.get('/api/pay', async (req, res) => {
     const formData = new AlipayFormData();
     formData.setMethod('get');
     
-    // **重要更新**: 显式设置支付成功后的回跳地址
+    // 显式设置支付成功后的回跳地址
     // 这是一个临时的测试地址，请在正式上线时替换为你自己的“支付成功”页面地址。
     formData.addField('returnUrl', 'https://www.google.com');
 
