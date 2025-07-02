@@ -49,10 +49,10 @@ try {
     appId: APP_ID,
     privateKey: APP_PRIVATE_KEY,
     alipayPublicKey: ALIPAY_PUBLIC_KEY,
-    // 将网关切换到沙箱环境进行测试
-    gateway: 'https://openapi-sandbox.alipay.com/gateway.do',
+    // 使用生产环境网关地址
+    gateway: 'https://openapi.alipay.com/gateway.do',
   });
-  console.log('支付宝 SDK 初始化成功 (沙箱模式)。');
+  console.log('支付宝 SDK 初始化成功 (生产模式)。');
 } catch (error) {
   console.error('[启动失败] 支付宝 SDK 初始化时发生错误:', error.message);
   throw new Error(`支付宝 SDK 初始化失败: ${error.message}`);
@@ -64,7 +64,7 @@ app.get('/api/pay', async (req, res) => {
   try {
     const orderId = `order_${Date.now()}`;
     const amount = '0.01';
-    const subject = '网站访问权限购买 (测试)';
+    const subject = '网站访问权限购买';
 
     const formData = new AlipayFormData();
     formData.setMethod('get');
@@ -85,8 +85,15 @@ app.get('/api/pay', async (req, res) => {
     res.json({ success: true, paymentUrl: result });
 
   } catch (error) {
-    console.error('生成支付链接失败:', error);
-    res.status(500).json({ success: false, message: '生成支付链接失败' });
+    // 优化错误日志，打印出支付宝返回的详细错误信息
+    console.error('生成支付链接失败，详细错误:', JSON.stringify(error, null, 2));
+    res.status(500).json({
+        success: false,
+        message: '生成支付链接失败',
+        // 将具体的错误码和信息也返回给前端，方便调试
+        errorCode: error.subCode || error.code,
+        errorMessage: error.subMsg || error.message,
+    });
   }
 });
 
