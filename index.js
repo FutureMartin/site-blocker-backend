@@ -4,10 +4,13 @@ const cors = require('cors');
 
 // --- START: 重要代码更新 ---
 // 修正 alipay-sdk 的导入方式
-// 根据最新的错误日志 "AlipaySDK is not a constructor"，这表明之前的导入方式不正确。
-// CommonJS 模块的导入方式可能发生了变化。我们现在尝试一种更标准的导入方法。
-const AlipaySDK = require('alipay-sdk');
-// AlipayFormData 现在作为主导出对象的一个属性来提供
+// 持续出现的 "AlipaySDK is not a constructor" 错误表明模块导入存在问题。
+// 这通常是 CommonJS (require) 和 ES Modules (import/export) 之间的兼容性问题。
+// 我们采用一种更健壮的方式来获取导出的类。
+const sdk = require('alipay-sdk');
+// 尝试获取 .default 导出（用于 ESM 模块），如果不存在，则回退到主导出（用于传统 CJS 模块）。
+const AlipaySDK = sdk.default || sdk;
+// 假设 AlipayFormData 现在是主 SDK 类的一个静态属性。
 const AlipayFormData = AlipaySDK.AlipayFormData;
 // --- END: 重要代码更新 ---
 
