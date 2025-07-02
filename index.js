@@ -3,15 +3,16 @@ const express = require('express');
 const cors = require('cors');
 
 // --- START: 重要代码更新 ---
-// 在将 Express 稳定在 v4 后，我们使用 alipay-sdk 最标准的 default 导入方式。
-// 之前的失败很可能是由不稳定的 Express v5-alpha 引起的。
-const AlipaySDK = require('alipay-sdk').default;
+// 使用标准的 CommonJS 方式导入 alipay-sdk
+// 这是导致之前崩溃的根本原因
+const AlipaySDK = require('alipay-sdk');
 
 // **增加防御性检查**：验证 AlipaySDK 是否被正确导入为一个可用的类(构造函数)
 if (typeof AlipaySDK !== 'function') {
   const errorMsg = '[启动失败] 无法从 "alipay-sdk" 中正确导入 AlipaySDK。请检查依赖版本或模块导出方式。';
   console.error(errorMsg);
-  throw new Error(errorMsg);
+  // 在生产环境中，如果核心依赖加载失败，则直接退出进程
+  process.exit(1);
 }
 
 // AlipayFormData 通常是主类的一个静态属性
@@ -21,7 +22,8 @@ const AlipayFormData = AlipaySDK.AlipayFormData;
 if (typeof AlipayFormData !== 'function') {
   const errorMsg = '[启动失败] 无法从 AlipaySDK 中正确导入 AlipayFormData。';
   console.error(errorMsg);
-  throw new Error(errorMsg);
+  // 在生产环境中，如果核心依赖加载失败，则直接退出进程
+  process.exit(1);
 }
 // --- END: 重要代码更新 ---
 
@@ -41,7 +43,8 @@ for (const [key, value] of Object.entries(requiredEnvVars)) {
   if (!value) {
     const errorMessage = `[启动失败] 致命错误: 缺少环境变量 ${key}。请在 Vercel 项目设置中正确配置该变量。`;
     console.error(errorMessage);
-    throw new Error(errorMessage);
+    // 在生产环境中，如果环境变量缺失，则直接退出进程
+    process.exit(1);
   }
 }
 console.log('[启动成功] 所有必需的环境变量均已成功加载。');
@@ -69,7 +72,8 @@ try {
   console.log('支付宝 SDK 初始化成功 (生产模式)。');
 } catch (error) {
   console.error('[启动失败] 支付宝 SDK 初始化时发生错误:', error.message);
-  throw new Error(`支付宝 SDK 初始化失败: ${error.message}`);
+  // 在生产环境中，如果 SDK 初始化失败，则直接退出进程
+  process.exit(1);
 }
 
 
@@ -83,25 +87,28 @@ app.get('/api/pay', async (req, res) => {
     const formData = new AlipayFormData();
     formData.setMethod('get');
     
-    formData.addField('returnUrl', 'https://www.google.com');
+    // 设置同步回调地址
+    formData.addField('returnUrl', 'https://www.google.com'); // 用户支付成功后跳转的页面
 
-    formData.add({
-      bizContent: {
-        outTradeNo: orderId,
-        productCode: 'FAST_INSTANT_TRADE_PAY',
-        totalAmount: amount,
-        subject: subject,
-      },
+    // 设置业务参数
+    formData.addField('bizContent', {
+      outTradeNo: orderId,
+      productCode: 'FAST_INSTANT_TRADE_PAY',
+      totalAmount: amount,
+      subject: subject,
     });
     
+    // 调用 SDK 生成支付链接
     const result = await alipaySdk.exec('alipay.trade.page.pay', {}, {
       formData: formData,
     });
 
     console.log('支付链接生成成功:', result);
+    // 将用户重定向到支付宝收银台
     res.redirect(result);
   } catch (error) {
     console.error('生成支付链接时出错:', error);
+    // 在向客户端发送响应之前记录服务器错误
     res.status(500).send('生成支付链接失败');
   }
 });
